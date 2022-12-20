@@ -1,0 +1,204 @@
+---
+title: "260_FinalProject"
+author: "Alexandra Barry"
+date: "2022-12-15"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+# Appendix: All code for this report
+
+```{r get-labels, echo = FALSE}
+labs = knitr::all_labels()
+labs = setdiff(labs, c("setup", "get-labels"))
+```
+
+### Data Investigation
+
+```{r}
+library(data.table)
+library(dplyr)
+library(tidyverse)
+
+df <- read_csv("/Users/alexandrabarry/Downloads/All CHDB Cities v16.0 - released Dec 14th, 2022/CHDB_data_city_all_v16.0.csv")
+```
+
+```{r}
+df |> group_by(state_abbr) |> summarize(length(unique(city_name)))
+
+keep <- c('state_abbr','city_name','metric_number','metric_name','group_name','group_number','num','denom','est','census_year')
+dat <- select(df,all_of(keep))
+dat <- as.data.table(dat)
+
+unique(dat$group_number)
+
+table(dat$group_name)
+table(dat$metric_name)
+```
+
+```{r}
+dat |> filter(metric_number == 2) |> group_by(state_abbr) |> summarize(mean(est))
+
+dat |> filter(metric_number == 37) |> group_by(state_abbr) |> summarize(mean(est))
+
+```
+
+```{r}
+pol_g <- dat |> filter(metric_number == 2) |>
+  group_by(state_abbr) |>
+  mutate(Avg_AirPol = mean(est), state_abbr = reorder(state_abbr,Avg_AirPol)) |>
+  ggplot(aes(x=state_abbr,y=Avg_AirPol,color=state_abbr)) +
+  stat_identity(show.legend=FALSE) +
+  theme(axis.text.x = element_text(angle=90)) + 
+  xlab('State') + 
+  ylab('Mean Air Pollution') +
+  ggtitle('Average Air Pollution (Particle Matter) by State')
+
+life_g <- dat |> filter(metric_number == 37) |>
+  group_by(state_abbr) |>
+  mutate(Avg_AirPol = mean(est), state_abbr = reorder(state_abbr,Avg_AirPol)) |>
+  ggplot(aes(x=state_abbr,y=Avg_AirPol,color=state_abbr)) +
+  stat_identity(show.legend=FALSE) +
+  theme(axis.text.x = element_text(angle=90)) + 
+  xlab('State') + 
+  ylab('Mean Lifespan') +
+  ggtitle('Average Lifespan by State')
+
+require(gridExtra)
+grid.arrange(pol_g, life_g, nrow=2)
+
+```
+
+### Data Wrangling
+```{r}
+airpol <- dat |> group_by(state_abbr) |> filter(metric_number == 2) |> summarize(mean(est))
+colnames(airpol) <- c('state_abbr','airpol')
+lifespan <- dat |> group_by(state_abbr) |> filter(metric_number == 37) |> summarize(mean(est))
+colnames(lifespan) <- c('state_abbr','lifespan')
+drinking <- dat |> group_by(state_abbr) |> filter(metric_number == 3) |> summarize(mean(est))
+colnames(drinking) <- c('state_abbr','drinking')
+smoking <- dat |> group_by(state_abbr) |> filter(metric_number == 22) |> summarize(mean(est))
+colnames(smoking) <- c('state_abbr','smoking')
+obesity <- dat |> group_by(state_abbr) |> filter(metric_number == 17) |> summarize(mean(est))
+colnames(obesity) <- c('state_abbr','obesity')
+lead <- dat |> group_by(state_abbr) |> filter(metric_number == 14) |> summarize(mean(est))
+colnames(lead) <- c('state_abbr','lead')
+
+
+df_list <- list(airpol,lifespan,drinking,smoking,obesity,lead)
+state_dat <- df_list |> reduce(full_join,by='state_abbr')
+head(state_dat)
+
+```
+
+### Evaluation of Linear Assumptions
+```{r}
+state_dat |> ggplot(aes(airpol,lifespan)) +geom_point()
+
+state_dat |> filter(!is.na(lifespan)) |> filter(!is.na(airpol)) |> summarize(r = cor(airpol, lifespan)) |> pull(r)
+
+B <- 1000
+N <- 25
+R <- replicate(B, {
+  sample_n(state_dat, N, replace = TRUE) |> 
+    filter(!is.na(lifespan)) |> filter(!is.na(airpol)) |>
+    summarize(r=cor(airpol, lifespan)) |> 
+    pull(r)
+})
+qplot(R, geom = "histogram", binwidth = 0.05, color = I("black"))
+mean(R)
+
+ggplot(aes(sample=R), data = data.frame(R)) + 
+  stat_qq() + 
+  geom_abline(intercept = mean(R), slope = sqrt((1-mean(R)^2)/(N-2)))
+```
+
+
+```{r}
+sumstat <- state_dat |> filter(!is.na(lifespan)) |> filter(!is.na(airpol)) |>
+  summarize(avg_lifespan = mean(lifespan),
+            s_life = sd(lifespan),
+            avg_airpol = mean(airpol),
+            s_airpol = sd(airpol),
+            r = cor(lifespan, airpol))
+sumstat
+```
+
+
+```{r}
+lm_life_airpol <- lm(lifespan ~ airpol + drinking + smoking + obesity + lead, data=state_dat)
+plot(fitted(lm_life_airpol),residuals(lm_life_airpol))
+abline(a=0,b=0,col='blue')
+```
+
+
+```{r}
+qqnorm(residuals(lm_life_airpol))
+qqline(residuals(lm_life_airpol),col="pink")
+```
+
+
+```{r}
+state_dat <- state_dat |> filter(!is.na(lifespan)) |> filter(!is.na(airpol))
+plot(state_dat$lifespan, state_dat$airpol)
+lines(lowess(state_dat$lifespan, state_dat$airpol), col="red", lwd=2)
+```
+
+```{r}
+#par(mfrow=c(4,2))
+#plot(lm_life_airpol, 4)
+#abline(h=4/(nrow(dat)-8), col='red')
+#plot(dffits(lm_life_airpol))
+#abline(h=2*sqrt(8/nrow(dat)),col="red")
+#abline(h=-2*sqrt(8/nrow(dat)),col="red")
+#plot(lm_life_airpol, 1:6)
+```
+
+
+```{r}
+summary(lm_life_airpol)
+```
+
+
+### Covariate Selection
+```{r}
+require(broom)
+
+model1 <- glm(lifespan ~ 1, data = state_dat)
+step <- step(model1, direction="forward", 
+             scope=(~ airpol + drinking + smoking + obesity + lead), data=state_dat)
+```
+
+### Model Selection
+```{r}
+library(splines2)
+library(gam)
+airpol2 <- state_dat$airpol^2
+
+## Quadratic model
+lm_life_airpol2 <- glm(lifespan ~ airpol + airpol2 + drinking + smoking + obesity + lead, data=state_dat)
+summary(lm_life_airpol2)
+
+## Cubic spline
+lm_life_spline <- glm(lifespan ~ airpol + bSpline(airpol,df=4) + drinking + smoking + obesity + lead, data=state_dat)
+summary(lm_life_spline)
+
+## Additive model
+gam_life <- gam(lifespan ~ s(airpol,4) + drinking + smoking + obesity + lead ,data=state_dat)
+summary(gam_life)
+
+summary(lm_life_airpol2)
+AIC(lm_life_airpol2)
+AIC(lm_life_airpol)
+AIC(lm_life_spline)
+AIC(gam_life)
+```
+
+```{r}
+summary(gam_life)
+```
+
+
+
